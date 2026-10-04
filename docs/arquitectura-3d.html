@@ -1,0 +1,647 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Arquitectura de Rutas Pasto · Recorrido 3D</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0d1411;
+      --panel: rgba(19, 29, 24, .94);
+      --line: #2a3b32;
+      --ink: #e8f1eb;
+      --mute: #a4b8aa;
+      --green: #68e3a2;
+      --teal: #2dd4bf;
+      --amber: #f0bd68;
+      --violet: #e879f9;
+      --blue: #8bb8ed;
+      font: 15px/1.45 "Avenir Next", "Segoe UI", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: var(--bg); color: var(--ink); }
+    button, select { color: inherit; font: inherit; }
+    button, select, a { -webkit-tap-highlight-color: transparent; }
+    button:focus-visible, select:focus-visible, a:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+    #architecture-scene { position: fixed; inset: 0; display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+    #architecture-scene:active { cursor: grabbing; }
+    .panel {
+      position: fixed;
+      z-index: 2;
+      top: 12px;
+      bottom: 12px;
+      left: 12px;
+      display: flex;
+      width: min(380px, calc(100vw - 24px));
+      flex-direction: column;
+      gap: 15px;
+      padding: 19px;
+      overflow: auto;
+      border: 1px solid rgba(101, 140, 119, .31);
+      border-radius: 16px;
+      background: var(--panel);
+      backdrop-filter: blur(13px);
+      box-shadow: 0 20px 70px rgba(0, 0, 0, .36);
+      scrollbar-color: #42584a transparent;
+    }
+    .eyebrow { margin: 0 0 4px; color: var(--green); font-size: 12px; font-weight: 700; letter-spacing: .15em; text-transform: uppercase; }
+    h1 { margin: 0; font-size: 25px; line-height: 1.14; letter-spacing: -.03em; }
+    .intro { margin: 7px 0 0; color: var(--mute); font-size: 14px; }
+    .section-title { margin: 0 0 7px; color: #9fb8a9; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; }
+    .flow-controls, .step-controls, .legend { display: flex; flex-wrap: wrap; gap: 7px; }
+    .flow-button, .step-button, .reset-button {
+      min-height: 42px;
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(26, 39, 32, .9);
+      cursor: pointer;
+      transition: background .15s ease, border-color .15s ease, color .15s ease;
+    }
+    .flow-button { flex: 1 1 30%; font-size: 13px; }
+    .flow-button:hover, .step-button:hover:not(:disabled), .reset-button:hover { border-color: #548469; background: #20362b; }
+    .flow-button[aria-pressed="true"] { border-color: var(--green); background: rgba(44, 102, 69, .43); color: #c7f6d9; }
+    .walkthrough { padding-top: 12px; border-top: 1px solid rgba(130, 161, 141, .17); }
+    .step-count { color: var(--green); font-variant-numeric: tabular-nums; }
+    .step-heading { margin: 5px 0 3px; font-size: 18px; line-height: 1.22; }
+    .step-copy { min-height: 62px; margin: 0; color: #c0cec4; font-size: 14px; }
+    .progress { height: 4px; margin: 11px 0 10px; overflow: hidden; border-radius: 4px; background: rgba(120, 148, 129, .2); }
+    .progress span { display: block; width: 0; height: 100%; border-radius: inherit; background: var(--green); transition: width .2s ease; }
+    .step-controls { justify-content: space-between; }
+    .step-button { flex: 1; }
+    .step-button:disabled { cursor: default; opacity: .42; }
+    .reset-button { min-height: 38px; padding: 6px 10px; color: var(--mute); font-size: 13px; }
+    .component { padding-top: 13px; border-top: 1px solid rgba(130, 161, 141, .17); }
+    .component-type { color: var(--teal); font-size: 12px; font-weight: 650; letter-spacing: .1em; text-transform: uppercase; }
+    .component-name { margin: 4px 0 5px; font-size: 21px; line-height: 1.18; }
+    .component-copy { margin: 0; color: #c0cec4; font-size: 14px; }
+    .tag-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0; padding: 0; list-style: none; }
+    .tag-list li { padding: 3px 8px; border: 1px solid rgba(104, 227, 162, .2); border-radius: 99px; color: #bce4ca; font-size: 12px; }
+    .source-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .source-list { display: grid; gap: 6px; max-height: 180px; overflow: auto; }
+    .source-link { display: block; padding: 7px 9px; border: 1px solid rgba(117, 146, 127, .19); border-radius: 8px; color: inherit; text-decoration: none; overflow-wrap: anywhere; }
+    .source-link:hover { border-color: rgba(104, 227, 162, .62); background: rgba(55, 89, 67, .22); }
+    .source-link strong { display: block; color: #e3eee6; font-size: 13px; font-weight: 600; }
+    .source-link small { display: block; margin-top: 2px; color: #a4b8aa; font-size: 12px; }
+    .open-option { display: flex; align-items: flex-start; gap: 8px; color: var(--mute); font-size: 13px; }
+    .open-option input { flex: 0 0 auto; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--green); }
+    .status { min-height: 20px; margin: 0; color: #a5dbb7; font-size: 12px; }
+    .legend {
+      position: fixed;
+      z-index: 1;
+      top: 14px;
+      right: 16px;
+      align-items: center;
+      gap: 13px;
+      padding: 9px 12px;
+      border: 1px solid rgba(101, 140, 119, .25);
+      border-radius: 10px;
+      background: rgba(13, 20, 17, .77);
+      color: var(--mute);
+      font-size: 12px;
+      backdrop-filter: blur(8px);
+    }
+    .legend-item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .legend-mark { width: 16px; height: 4px; border-radius: 4px; background: var(--green); }
+    .legend-mark.base { background: #587162; }
+    .legend-mark.selected { width: 9px; height: 9px; border-radius: 50%; background: var(--violet); }
+    .legend-mark.database { background: var(--amber); }
+    .hint { position: fixed; z-index: 1; right: 16px; bottom: 14px; color: #b1c2b6; font-size: 12px; text-align: right; text-shadow: 0 1px 5px #000; }
+    .hint span { display: block; }
+    .error { position: fixed; z-index: 4; inset: auto 12px 12px auto; max-width: 420px; padding: 12px 16px; border: 1px solid #b35e64; border-radius: 10px; background: #2b191b; color: #ffd9d9; }
+    @media (max-width: 760px) {
+      .panel { top: auto; right: 8px; bottom: 8px; left: 8px; width: auto; max-height: 55vh; gap: 11px; padding: 14px; }
+      h1 { font-size: 21px; }
+      .intro { font-size: 13px; }
+      .step-copy { min-height: 0; }
+      .source-list { max-height: 116px; }
+      .legend { top: 9px; right: 9px; max-width: calc(100vw - 18px); gap: 9px; padding: 7px 9px; font-size: 11px; }
+      .legend-item { gap: 4px; }
+      .hint { display: none; }
+    }
+    @media (max-width: 430px) {
+      .panel { max-height: 58vh; padding: 12px; }
+      .flow-button { min-height: 40px; padding: 7px 5px; font-size: 12px; }
+      .legend-item.optional { display: none; }
+      .component-name { font-size: 19px; }
+    }
+    @media (prefers-reduced-motion: reduce) { *, *::before, *::after { transition-duration: .01ms !important; } }
+  </style>
+</head>
+<body>
+  <canvas id="architecture-scene" role="img" aria-label="Diagrama de arquitectura 3D de Rutas Pasto. Arrastra para orbitar; selecciona un bloque para inspeccionar el componente."></canvas>
+
+  <aside class="panel" aria-label="Recorrido de la arquitectura">
+    <header>
+      <p class="eyebrow">Rutas Pasto · vista técnica</p>
+      <h1>Cómo viaja una entrega</h1>
+      <p class="intro">Recorre la comunicación entre clientes, backend y datos. Cada bloque abre la explicación y los archivos que implementan su función.</p>
+    </header>
+
+    <section aria-labelledby="flow-title">
+      <h2 class="section-title" id="flow-title">Elige un recorrido</h2>
+      <div class="flow-controls">
+        <button class="flow-button" type="button" data-flow="route" aria-pressed="true">Optimizar ruta</button>
+        <button class="flow-button" type="button" data-flow="tracking" aria-pressed="false">Seguir pedido</button>
+        <button class="flow-button" type="button" data-flow="structures" aria-pressed="false">Estructuras</button>
+      </div>
+    </section>
+
+    <section class="walkthrough" aria-live="polite" aria-atomic="true" aria-label="Paso actual del recorrido">
+      <div class="section-title"><span id="guide-flow">Optimización de ruta</span> · <span class="step-count" id="guide-count">Paso 1 de 7</span></div>
+      <h2 class="step-heading" id="guide-title">La interfaz inicia la solicitud</h2>
+      <p class="step-copy" id="guide-copy">El despachador elige los pedidos; la interfaz envía una solicitud HTTP.</p>
+      <div class="progress" id="guide-progress-track" role="progressbar" aria-label="Progreso del recorrido" aria-valuemin="1" aria-valuemax="7" aria-valuenow="1"><span id="guide-progress"></span></div>
+      <div class="step-controls">
+        <button class="step-button" id="step-back" type="button" disabled>← Anterior</button>
+        <button class="step-button" id="step-forward" type="button">Siguiente →</button>
+        <button class="reset-button" id="reset-camera" type="button" aria-label="Restablecer vista 3D">Centrar</button>
+      </div>
+    </section>
+
+    <section class="component" aria-live="polite" aria-label="Componente seleccionado">
+      <div class="component-type" id="component-type">Cliente web</div>
+      <h2 class="component-name" id="component-name">Dashboard Next.js</h2>
+      <p class="component-copy" id="component-copy"></p>
+      <ul class="tag-list" id="component-tags"></ul>
+    </section>
+
+    <section aria-label="Código del componente">
+      <div class="source-head"><h2 class="section-title">Archivos relacionados</h2></div>
+      <div class="source-list" id="source-list"></div>
+    </section>
+
+    <label class="open-option"><input id="open-on-select" type="checkbox" checked>Al seleccionar un bloque, intentar abrir su archivo principal en VS Code</label>
+    <label for="component-picker" class="section-title">Explorar componente</label>
+    <select id="component-picker" aria-label="Explorar componente del diagrama"></select>
+    <p class="status" id="interaction-status" role="status"></p>
+  </aside>
+
+  <div class="legend" aria-label="Leyenda del diagrama">
+    <span class="legend-item"><i class="legend-mark"></i>Paso actual</span>
+    <span class="legend-item optional"><i class="legend-mark base"></i>Conexión</span>
+    <span class="legend-item"><i class="legend-mark selected"></i>Componente</span>
+    <span class="legend-item optional"><i class="legend-mark database"></i>Datos</span>
+  </div>
+  <div class="hint"><span>Arrastra para orbitar · rueda para acercar</span><span>Selecciona un bloque para abrir sus archivos</span></div>
+  <div class="error" id="scene-error" role="alert" hidden>Este navegador no pudo iniciar WebGL para dibujar el esquema 3D.</div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script>
+    (() => {
+      'use strict';
+
+      const REPO = '/Users/jhon/Documents/PROYECTO RUTAS ESTRUCTURAS DE DATOS/rutas-pasto';
+      const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      const nodes = [
+        { id: 'frontend', name: 'Dashboard Next.js', title: 'Next.js · TypeScript', small: 'CLIENTE WEB', type: 'Interfaz web', color: 0x73d7e3, x: -7, y: 4.5, z: 0, description: 'El despachador y los clientes usan páginas y componentes TypeScript. MapLibre presenta las calles y la ruta; el navegador envía solicitudes HTTP, nunca credenciales de base de datos.', tags: ['Next.js 15', 'TypeScript', 'MapLibre'], files: ['src/app/dashboard/page.tsx', 'src/components/MapLibreRouteMap.tsx', 'src/components/AppShell.tsx'] },
+        { id: 'ios', name: 'App de repartidor', title: 'iPhone · SwiftUI', small: 'CLIENTE MÓVIL', type: 'App nativa', color: 0x91c9dc, x: 7, y: 4.5, z: 0, description: 'La app nativa para iPhone comparte la API FastAPI. Reporta ubicación y consulta el seguimiento autorizado; no se conecta a PostgreSQL.', tags: ['SwiftUI', 'HTTP', 'Misma API'], files: ['ios/RutasPasto/Services/TrackingService.swift', 'ios/RutasPasto/Stores/TrackingStore.swift', 'ios/RutasPasto/Views/ContentView.swift'] },
+        { id: 'gateway', name: 'Reenvío HTTP', title: 'Next rewrites · ALB', small: 'ENTRADA PROTEGIDA', type: 'Enrutamiento HTTP', color: 0x8bb8ed, x: 0, y: 2.7, z: 0, description: 'En desarrollo Next.js reenvía /api/* a FastAPI. En AWS, el ALB enruta /api/* al servicio Python y el resto al frontend, manteniendo un solo origen para el navegador.', tags: ['Local: Next rewrites', 'AWS: ALB', 'Sin acceso directo a DB'], files: ['next.config.ts', 'deploy/aws/lib/rutas-pasto-stack.ts', 'deploy/aws/README.md'] },
+        { id: 'api', name: 'API FastAPI', title: 'Rutas HTTP · Python', small: 'API · BACKEND', type: 'Backend HTTP', color: 0x68e3a2, x: 0, y: 1, z: 0, description: 'Los routers /api validan autenticación, permisos y contratos. Esta frontera protege el acceso a los casos de uso y los datos.', tags: ['FastAPI', 'Pydantic', '/api/*'], files: ['backend/app/main.py', 'backend/app/api/routes.py', 'backend/app/api/orders.py', 'backend/app/api/tracking.py'] },
+        { id: 'schemas', name: 'Contratos Pydantic', title: 'Validación de entrada / salida', small: 'CONTRATOS', type: 'Validación', color: 0x9bdab8, x: -4.8, y: -0.8, z: 0, description: 'Los esquemas tipados validan cuerpos y respuestas en el servidor. La validación visual mejora la experiencia, pero no sustituye esta protección.', tags: ['Pydantic', 'Validación servidor', 'DTOs'], files: ['backend/app/schemas/orders.py', 'backend/app/schemas/couriers.py', 'backend/app/schemas/auth.py'] },
+        { id: 'services', name: 'Servicios de aplicación', title: 'Casos de uso', small: 'REGLAS DE NEGOCIO', type: 'Backend · negocio', color: 0x68e3a2, x: 0, y: -0.8, z: 0, description: 'Orquestan la planificación y el recálculo de rutas, tráfico, ETA, ubicaciones y avisos. Coordinan el núcleo puro y la persistencia.', tags: ['Planificación', 'Tráfico y ETA', 'Avisos'], files: ['backend/app/services/route_planner.py', 'backend/app/services/traffic.py', 'backend/app/services/location_event_queue.py', 'backend/app/services/customer_notifications.py'] },
+        { id: 'notifications', name: 'IA y notificaciones', title: 'Opcionales · consentimiento', small: 'INTEGRACIONES', type: 'Servicios opcionales', color: 0xd2a8e8, x: 5.2, y: -0.8, z: 0, description: 'Las integraciones externas son opcionales. El backend minimiza los datos compartidos y respeta el consentimiento; los avisos se registran antes de intentar entregarse.', tags: ['IA opcional', 'SMTP · Twilio', 'Consentimiento'], files: ['backend/app/services/address_normalization.py', 'backend/app/services/customer_order_chat.py', 'backend/app/services/customer_notifications.py', 'backend/app/repositories/customer_notification_repository.py'] },
+        { id: 'core', name: 'Núcleo de algoritmos', title: 'Optimización · grafos · estructuras', small: 'LÓGICA PURA · PYTHON', type: 'Core independiente', color: 0x77e9a7, x: -4.4, y: -2.8, z: 0, description: 'Código Python independiente de FastAPI y SQLAlchemy. Nearest Neighbor + 2-opt ordenan paradas sobre tiempos viales; el grafo, Dijkstra, A* y MinHeap forman el núcleo académico.', tags: ['Graph · Dijkstra · A*', 'MinHeap', 'Queue · Stack · listas', 'Nearest Neighbor · 2-opt'], files: ['backend/app/core/optimization/nearest_neighbor.py', 'backend/app/core/optimization/two_opt.py', 'backend/app/core/graph/graph.py', 'backend/app/core/graph/dijkstra.py', 'backend/app/core/graph/astar.py', 'backend/app/core/structures/min_heap.py', 'backend/app/core/structures/queue.py', 'backend/app/core/structures/stack.py', 'backend/app/core/structures/doubly_linked_list.py'] },
+        { id: 'providers', name: 'Ruteo y tráfico', title: 'OSRM · TomTom · ORS', small: 'CALLES Y TRÁFICO', type: 'Proveedores externos', color: 0xbd9af2, x: 4.7, y: -2.8, z: 0, description: 'OSRM es primario para matrices de tiempo y geometría de calles. TomTom ajusta solo tramos muestreados; ORS es alternativo. El núcleo no hace llamadas externas.', tags: ['OSRM primario', 'TomTom muestreado', 'ORS alternativo'], files: ['backend/app/core/routing/osrm_client.py', 'backend/app/core/routing/ors_client.py', 'backend/app/core/traffic/tomtom.py', 'backend/app/services/traffic.py'] },
+        { id: 'repository', name: 'Persistencia SQLAlchemy', title: 'Repositorios · transacciones', small: 'ACCESO A DATOS', type: 'Persistencia', color: 0xe5bd73, x: 0, y: -2.8, z: 3.8, description: 'Los repositorios consultan y actualizan entidades con sesiones asíncronas. Las transacciones preservan consistencia entre ruta, paradas, ubicaciones y avisos.', tags: ['SQLAlchemy 2 async', 'Repositorios', 'Transacciones'], files: ['backend/app/db/session.py', 'backend/app/models/entities.py', 'backend/app/repositories/route_repository.py', 'backend/app/repositories/delivery_point_repository.py', 'backend/alembic/env.py'] },
+        { id: 'database', name: 'PostgreSQL', title: 'Pedidos · rutas · eventos', small: 'DATOS PERSISTENTES', type: 'Base de datos', color: 0xf0bd68, x: 0, y: -4.8, z: 3.8, description: 'Almacena pedidos, repartidores, rutas y eventos de ubicación, además de revisiones y avisos pendientes. En AWS está previsto RDS privado; Alembic gestiona las migraciones.', tags: ['PostgreSQL', 'Alembic', 'RDS privado (objetivo)'], files: ['backend/app/models/entities.py', 'backend/app/models/enums.py', 'backend/alembic/versions/0001_adopt_prisma_schema.py', 'docker-compose.yml', 'deploy/aws/lib/rutas-pasto-stack.ts'] }
+      ];
+
+      const edges = [
+        { id: 'web-gateway', from: 'frontend', to: 'gateway', label: 'HTTP /api/*' },
+        { id: 'ios-gateway', from: 'ios', to: 'gateway', label: 'HTTP /api/*' },
+        { id: 'gateway-api', from: 'gateway', to: 'api', label: 'reenvía /api' },
+        { id: 'api-schemas', from: 'api', to: 'schemas', label: 'valida contrato' },
+        { id: 'schemas-services', from: 'schemas', to: 'services', label: 'entrada validada' },
+        { id: 'services-core', from: 'services', to: 'core', label: 'pasa matriz de costos' },
+        { id: 'core-services', from: 'core', to: 'services', label: 'orden optimizado' },
+        { id: 'services-providers', from: 'services', to: 'providers', label: 'solicita matriz y calles' },
+        { id: 'providers-services', from: 'providers', to: 'services', label: 'tiempos y geometría' },
+        { id: 'services-repository', from: 'services', to: 'repository', label: 'consulta / guarda' },
+        { id: 'repository-db', from: 'repository', to: 'database', label: 'SQL / commit' },
+        { id: 'db-repository', from: 'database', to: 'repository', label: 'filas persistidas' },
+        { id: 'repository-services', from: 'repository', to: 'services', label: 'entidades' },
+        { id: 'services-api', from: 'services', to: 'api', label: 'respuesta' },
+        { id: 'api-gateway', from: 'api', to: 'gateway', label: 'JSON / status' },
+        { id: 'gateway-web', from: 'gateway', to: 'frontend', label: 'mapa + estado' },
+        { id: 'services-notifications', from: 'services', to: 'notifications', label: 'aviso consentido' },
+        { id: 'notifications-db', from: 'notifications', to: 'database', label: 'outbox' }
+      ];
+
+      const flows = {
+        route: {
+          name: 'Optimización de ruta',
+          nodes: ['frontend', 'gateway', 'api', 'schemas', 'services', 'core', 'providers', 'repository', 'database'],
+          edges: ['web-gateway', 'gateway-api', 'api-schemas', 'schemas-services', 'services-core', 'core-services', 'services-providers', 'providers-services', 'services-repository', 'repository-db', 'db-repository', 'repository-services', 'services-api', 'api-gateway', 'gateway-web'],
+          steps: [
+            { title: 'La interfaz inicia la solicitud', text: 'El despachador elige un repartidor y varios pedidos pendientes. Next.js envía la solicitud HTTP; el navegador nunca accede directamente a PostgreSQL.', focus: 'frontend', nodes: ['frontend', 'gateway'], edges: ['web-gateway'] },
+            { title: 'El acceso conduce a FastAPI', text: 'En local, Next.js reenvía /api/* a FastAPI. En AWS, el ALB hace ese enrutamiento y conserva un solo origen web.', focus: 'gateway', nodes: ['gateway', 'api'], edges: ['gateway-api'] },
+            { title: 'FastAPI valida antes de operar', text: 'Los routers y contratos Pydantic verifican autenticación, permisos y datos. Solo una solicitud válida pasa al caso de uso de planificación.', focus: 'schemas', nodes: ['api', 'schemas', 'services'], edges: ['api-schemas', 'schemas-services'] },
+            { title: 'OSRM aporta las calles y los tiempos', text: 'El servicio obtiene de OSRM una matriz de tiempos viales y la geometría. TomTom puede ajustar tramos muestreados; los proveedores no se importan dentro del núcleo puro.', focus: 'providers', nodes: ['services', 'providers', 'core'], edges: ['services-providers', 'providers-services', 'services-core'] },
+            { title: 'Los algoritmos ordenan las paradas', text: 'Nearest Neighbor propone un orden y 2-opt intenta mejorarlo usando minutos de viaje. Dijkstra y A* son algoritmos académicos; no reemplazan la red vial de OSRM.', focus: 'core', nodes: ['services', 'core'], edges: ['services-core', 'core-services'] },
+            { title: 'La base recibe una operación consistente', text: 'El repositorio persiste ruta, secuencia de paradas e información relacionada en una transacción. Si falla, no debe quedar una ruta a medias.', focus: 'repository', nodes: ['services', 'repository', 'database'], edges: ['services-repository', 'repository-db', 'db-repository', 'repository-services'] },
+            { title: 'MapLibre presenta el resultado', text: 'FastAPI devuelve orden, geometría vial, tiempos y avisos. El frontend dibuja la ruta verde en MapLibre y señala cualquier fallback o degradación.', focus: 'frontend', nodes: ['database', 'repository', 'services', 'api', 'gateway', 'frontend'], edges: ['services-api', 'api-gateway', 'gateway-web'] }
+          ]
+        },
+        tracking: {
+          name: 'Seguimiento de pedido',
+          nodes: ['frontend', 'ios', 'gateway', 'api', 'schemas', 'services', 'repository', 'database', 'notifications'],
+          edges: ['web-gateway', 'ios-gateway', 'gateway-api', 'api-schemas', 'schemas-services', 'services-repository', 'repository-db', 'db-repository', 'repository-services', 'services-notifications', 'notifications-db', 'services-api', 'api-gateway', 'gateway-web'],
+          steps: [
+            { title: 'Cliente o repartidor inicia el seguimiento', text: 'El cliente consulta con su guía; la app iOS reporta una ubicación autenticada. Ambos usan la misma API y no una conexión directa a la base.', focus: 'ios', nodes: ['frontend', 'ios', 'gateway'], edges: ['web-gateway', 'ios-gateway'] },
+            { title: 'El backend valida acceso y formato', text: 'FastAPI comprueba autorización y contrato en el servidor. Los datos privados del pedido permanecen en el flujo protegido del backend.', focus: 'api', nodes: ['gateway', 'api', 'schemas'], edges: ['gateway-api', 'api-schemas'] },
+            { title: 'El servicio consulta el estado real', text: 'El caso de uso resuelve el pedido asociado a la guía y calcula el ETA disponible. Si una IA opcional falla, continúa la respuesta determinista.', focus: 'services', nodes: ['schemas', 'services'], edges: ['schemas-services'] },
+            { title: 'La persistencia conserva ruta e historial', text: 'Los repositorios consultan PostgreSQL. Una cola FIFO serializa las escrituras GPS y aplica backpressure para proteger la base.', focus: 'database', nodes: ['services', 'repository', 'database'], edges: ['services-repository', 'repository-db', 'db-repository', 'repository-services'] },
+            { title: 'Los avisos dependen del consentimiento', text: 'Los avisos autorizados se anotan en el outbox y se intentan entregar después del commit. Sin credenciales, permanecen pendientes: no se simula el envío.', focus: 'notifications', nodes: ['services', 'notifications', 'database'], edges: ['services-notifications', 'notifications-db'] },
+            { title: 'La respuesta revela solo lo necesario', text: 'La API devuelve estado y datos permitidos para esa guía. La interfaz representa el seguimiento sin exponer pedidos de otros clientes.', focus: 'frontend', nodes: ['services', 'api', 'gateway', 'frontend'], edges: ['services-api', 'api-gateway', 'gateway-web'] }
+          ]
+        },
+        structures: {
+          name: 'Estructuras de datos',
+          nodes: ['services', 'core', 'providers'],
+          edges: ['services-core', 'core-services', 'services-providers', 'providers-services'],
+          steps: [
+            { title: 'OSRM entrega costos al servicio', text: 'La matriz de tiempos por calles llega desde OSRM al servicio de planificación. El servicio la pasa como dato al núcleo; las estructuras no realizan llamadas HTTP.', focus: 'providers', nodes: ['services', 'providers'], edges: ['services-providers', 'providers-services'] },
+            { title: 'Nearest Neighbor propone la visita', text: 'La matriz en minutos permite elegir cada siguiente parada según el tiempo vial desde la parada actual. La Queue FIFO se usa aparte para serializar ubicaciones GPS.', focus: 'core', nodes: ['services', 'core'], edges: ['services-core'] },
+            { title: '2-opt intenta acortar la ruta', text: 'El algoritmo invierte segmentos si disminuye el costo del camino abierto. Luego el servicio solicita la geometría vial del orden resultante.', focus: 'core', nodes: ['core', 'services'], edges: ['core-services', 'services-providers'] },
+            { title: 'Grafo y MinHeap resuelven caminos ponderados', text: 'El grafo dirigido guarda aristas y costos; Dijkstra y A* usan MinHeap. Son implementaciones propias, no sustitutos del mapa vial real.', focus: 'core', nodes: ['services', 'core'], edges: ['services-core', 'core-services'] },
+            { title: 'Queue, Stack y listas ayudan a operar', text: 'Queue serializa eventos GPS; Stack conserva snapshots para deshacer un recálculo; la lista doble mueve entradas de la caché LRU en O(1).', focus: 'core', nodes: ['services', 'core'], edges: ['services-core', 'core-services'] }
+          ]
+        }
+      };
+
+      const canvas = document.getElementById('architecture-scene');
+      const status = document.getElementById('interaction-status');
+      const picker = document.getElementById('component-picker');
+      const sourceList = document.getElementById('source-list');
+      const nodeById = new Map(nodes.map(node => [node.id, node]));
+      const edgeById = new Map(edges.map(edge => [edge.id, edge]));
+      let activeFlow = 'route';
+      let activeStep = 0;
+      let selectedId = 'frontend';
+      let yaw = -.38;
+      let pitch = .44;
+      let zoom = 1;
+      let drag = null;
+      let renderer;
+      let camera;
+      let scene;
+      let cameraTarget;
+      const nodeMeshes = new Map();
+      const edgeMeshes = new Map();
+      const raycaster = new THREE.Raycaster();
+      const pointer = new THREE.Vector2();
+
+      function showSceneError(message) {
+        const error = document.getElementById('scene-error');
+        error.textContent = message;
+        error.hidden = false;
+      }
+
+      function vscodeUri(relativePath) {
+        const fullPath = `${REPO}/${relativePath}`;
+        const encoded = fullPath.split('/').map(part => encodeURIComponent(part)).join('/');
+        return `vscode://file${encoded}:1:1`;
+      }
+
+      function resetOverviewTarget() {
+        if (cameraTarget) cameraTarget.set(window.innerWidth < 760 ? 0 : -3.8, 0, 0);
+      }
+
+      function selectNode(id, openCode = false, focusCamera = false) {
+        const node = nodeById.get(id);
+        if (!node) return;
+        selectedId = id;
+        document.getElementById('component-type').textContent = node.type;
+        document.getElementById('component-name').textContent = node.name;
+        document.getElementById('component-copy').textContent = node.description;
+        document.getElementById('component-tags').replaceChildren(...node.tags.map(value => {
+          const tag = document.createElement('li');
+          tag.textContent = value;
+          return tag;
+        }));
+        sourceList.replaceChildren(...node.files.map((file, index) => {
+          const link = document.createElement('a');
+          const basename = file.split('/').pop();
+          link.className = 'source-link';
+          link.href = vscodeUri(file);
+          link.title = `Abrir ${file} en VS Code`;
+          const name = document.createElement('strong');
+          name.textContent = index === 0 ? `Principal · ${basename}` : basename;
+          const path = document.createElement('small');
+          path.textContent = file;
+          link.append(name, path);
+          link.addEventListener('click', () => { status.textContent = `Intentando abrir ${file} en VS Code…`; });
+          return link;
+        }));
+        picker.value = id;
+        if (focusCamera && cameraTarget) {
+          const isMobile = window.innerWidth < 760;
+          cameraTarget.set(node.x - (isMobile ? 0 : 3.8), node.y - (isMobile ? 2.2 : 0), node.z);
+        }
+        if (openCode && document.getElementById('open-on-select').checked) {
+          window.open(vscodeUri(node.files[0]), '_blank');
+          status.textContent = `Componente seleccionado: ${node.name}. Intentando abrir su archivo principal en VS Code.`;
+        } else {
+          status.textContent = `Componente seleccionado: ${node.name}.`;
+        }
+        updateSceneState();
+      }
+
+      function showStep(index) {
+        const flow = flows[activeFlow];
+        activeStep = Math.max(0, Math.min(flow.steps.length - 1, index));
+        const step = flow.steps[activeStep];
+        const number = activeStep + 1;
+        document.getElementById('guide-flow').textContent = flow.name;
+        document.getElementById('guide-count').textContent = `Paso ${number} de ${flow.steps.length}`;
+        document.getElementById('guide-title').textContent = step.title;
+        document.getElementById('guide-copy').textContent = step.text;
+        const progress = document.getElementById('guide-progress-track');
+        progress.setAttribute('aria-valuemax', String(flow.steps.length));
+        progress.setAttribute('aria-valuenow', String(number));
+        document.getElementById('guide-progress').style.width = `${number / flow.steps.length * 100}%`;
+        document.getElementById('step-back').disabled = activeStep === 0;
+        document.getElementById('step-forward').disabled = activeStep === flow.steps.length - 1;
+        resetOverviewTarget();
+        selectNode(step.focus);
+        updateSceneState();
+      }
+
+      function setFlow(id) {
+        if (!flows[id]) return;
+        activeFlow = id;
+        document.querySelectorAll('[data-flow]').forEach(button => {
+          button.setAttribute('aria-pressed', String(button.dataset.flow === id));
+        });
+        showStep(0);
+      }
+
+      function makeFaceTexture(title, detail, accent) {
+        const face = document.createElement('canvas');
+        face.width = 640;
+        face.height = 220;
+        const context = face.getContext('2d');
+        context.fillStyle = '#14231c';
+        context.fillRect(0, 0, face.width, face.height);
+        context.fillStyle = `#${accent.toString(16).padStart(6, '0')}`;
+        context.fillRect(0, 0, 10, face.height);
+        context.textAlign = 'center';
+        context.textBaseline = 'middle';
+        context.fillStyle = '#edf5ef';
+        let fontSize = 42;
+        context.font = `600 ${fontSize}px system-ui, sans-serif`;
+        let label = title;
+        while (context.measureText(label).width > 565 && fontSize > 27) {
+          fontSize -= 2;
+          context.font = `600 ${fontSize}px system-ui, sans-serif`;
+        }
+        context.fillText(label, 325, 83, 565);
+        context.fillStyle = '#a8bdaf';
+        context.font = '500 25px system-ui, sans-serif';
+        context.fillText(detail, 325, 158, 565);
+        const texture = new THREE.CanvasTexture(face);
+        texture.needsUpdate = true;
+        return texture;
+      }
+
+      function makeLaneLabel(text, x, y, z) {
+        const face = document.createElement('canvas');
+        face.width = 512;
+        face.height = 80;
+        const context = face.getContext('2d');
+        context.font = '600 30px system-ui, sans-serif';
+        context.fillStyle = '#91a99a';
+        context.textBaseline = 'middle';
+        context.fillText(text, 8, 42);
+        const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(face), transparent: true, depthTest: false, opacity: .66 }));
+        sprite.position.set(x, y, z);
+        sprite.scale.set(5.6, .88, 1);
+        scene.add(sprite);
+        return sprite;
+      }
+
+      function createNode(node) {
+        const group = new THREE.Group();
+        group.position.set(node.x, node.y, node.z);
+        const material = new THREE.MeshStandardMaterial({
+          color: 0x263b30,
+          roughness: .38,
+          metalness: .22,
+          emissive: node.color,
+          emissiveIntensity: .04
+        });
+        const body = new THREE.Mesh(new THREE.BoxGeometry(3.35, 1.42, 1.45), material);
+        body.userData.nodeId = node.id;
+        group.add(body);
+        const faceMaterial = new THREE.MeshBasicMaterial({ map: makeFaceTexture(node.title, node.small, node.color), transparent: false });
+        const face = new THREE.Mesh(new THREE.PlaneGeometry(3.18, 1.22), faceMaterial);
+        face.position.set(0, 0, .733);
+        face.userData.nodeId = node.id;
+        group.add(face);
+        const pin = new THREE.Mesh(new THREE.SphereGeometry(.12, 16, 12), new THREE.MeshBasicMaterial({ color: node.color }));
+        pin.position.set(1.38, .48, .78);
+        group.add(pin);
+        const ring = new THREE.Mesh(new THREE.TorusGeometry(1.93, .055, 8, 40), new THREE.MeshBasicMaterial({ color: 0xe879f9, transparent: true, opacity: .95 }));
+        ring.position.set(0, 0, .8);
+        ring.visible = false;
+        group.add(ring);
+        scene.add(group);
+        nodeMeshes.set(node.id, { group, body, ring, pin });
+      }
+
+      function createConnection(edge, index) {
+        const from = nodeById.get(edge.from);
+        const to = nodeById.get(edge.to);
+        const startCenter = new THREE.Vector3(from.x, from.y, from.z);
+        const endCenter = new THREE.Vector3(to.x, to.y, to.z);
+        const direction = endCenter.clone().sub(startCenter).normalize();
+        const start = startCenter.add(direction.clone().multiplyScalar(1.88));
+        const end = endCenter.sub(direction.clone().multiplyScalar(1.88));
+        const control = start.clone().add(end).multiplyScalar(.5);
+        control.z += (index % 2 === 0 ? 1 : -1) * .65;
+        control.y += (index % 3 - 1) * .34;
+        const curve = new THREE.QuadraticBezierCurve3(start, control, end);
+        const tube = new THREE.Mesh(
+          new THREE.TubeGeometry(curve, 28, .025, 5, false),
+          new THREE.MeshBasicMaterial({ color: 0x536e5d, transparent: true, opacity: .36 })
+        );
+        const arrow = new THREE.Mesh(new THREE.ConeGeometry(.14, .34, 12), new THREE.MeshBasicMaterial({ color: 0x536e5d, transparent: true, opacity: .46 }));
+        const arrowPosition = curve.getPoint(.98);
+        arrow.position.copy(arrowPosition);
+        arrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), curve.getTangent(.98).normalize());
+        const particle = new THREE.Mesh(new THREE.SphereGeometry(.09, 12, 10), new THREE.MeshBasicMaterial({ color: 0x68e3a2 }));
+        particle.visible = false;
+        const label = makeLaneLabel(edge.label, 0, -100, 0);
+        label.visible = false;
+        label.scale.set(3.2, .5, 1);
+        label.position.copy(curve.getPoint(.52));
+        label.position.y += .38;
+        scene.add(tube, arrow, particle);
+        edgeMeshes.set(edge.id, { curve, tube, arrow, particle, label, index });
+      }
+
+      function updateSceneState() {
+        if (!renderer || nodeMeshes.size !== nodes.length || edgeMeshes.size !== edges.length) return;
+        const flow = flows[activeFlow];
+        const step = flow.steps[activeStep];
+        const flowEdges = new Set(flow.edges);
+        const stepEdges = new Set(step.edges);
+        const stepNodes = new Set(step.nodes);
+        for (const node of nodes) {
+          const visual = nodeMeshes.get(node.id);
+          const active = stepNodes.has(node.id);
+          visual.body.material.emissiveIntensity = node.id === selectedId ? .22 : active ? .16 : flow.nodes?.includes(node.id) ? .08 : .025;
+          visual.body.material.color.setHex(active ? 0x294a38 : flow.nodes?.includes(node.id) ? 0x20372d : 0x1a2821);
+          visual.ring.visible = node.id === selectedId;
+          visual.pin.material.color.setHex(node.id === selectedId ? 0xe879f9 : node.color);
+        }
+        for (const edge of edges) {
+          const visual = edgeMeshes.get(edge.id);
+          const inFlow = flowEdges.has(edge.id);
+          const featured = stepEdges.has(edge.id);
+          visual.tube.material.color.setHex(featured ? 0x68e3a2 : inFlow ? 0x55916c : 0x455b4e);
+          visual.tube.material.opacity = featured ? .96 : inFlow ? .48 : .21;
+          visual.arrow.material.color.setHex(featured ? 0x68e3a2 : inFlow ? 0x55916c : 0x455b4e);
+          visual.arrow.material.opacity = featured ? .98 : inFlow ? .55 : .25;
+          visual.particle.visible = featured;
+          visual.label.visible = featured && window.innerWidth > 760;
+        }
+      }
+
+      function resize() {
+        if (!renderer || !camera) return;
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+        renderer.setSize(width, height, false);
+        camera.aspect = width / height;
+        camera.fov = width < 760 ? 46 : 42;
+        camera.updateProjectionMatrix();
+      }
+
+      function updateCamera() {
+        const baseDistance = window.innerWidth < 760 ? 30 : 22;
+        const distance = baseDistance / zoom;
+        const offset = new THREE.Vector3(
+          distance * Math.sin(yaw) * Math.cos(pitch),
+          distance * Math.sin(pitch),
+          distance * Math.cos(yaw) * Math.cos(pitch)
+        );
+        camera.position.copy(cameraTarget).add(offset);
+        camera.lookAt(cameraTarget);
+      }
+
+      function animate(time) {
+        requestAnimationFrame(animate);
+        updateCamera();
+        if (!reducedMotion) {
+          for (const visual of edgeMeshes.values()) {
+            if (!visual.particle.visible) continue;
+            const progress = (time * .00016 + visual.index * .19) % .82 + .08;
+            visual.particle.position.copy(visual.curve.getPoint(progress));
+          }
+        }
+        renderer.render(scene, camera);
+      }
+
+      function initScene() {
+        if (!window.THREE) {
+          showSceneError('No se pudo cargar el motor 3D. Revisa la conexión al CDN de Three.js y vuelve a abrir esta página.');
+          return;
+        }
+        try {
+          renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
+          renderer.setClearColor(0x0d1411, 1);
+          scene = new THREE.Scene();
+          scene.background = new THREE.Color(0x0d1411);
+          scene.fog = new THREE.Fog(0x0d1411, 34, 100);
+          camera = new THREE.PerspectiveCamera(42, 1, .1, 180);
+        cameraTarget = new THREE.Vector3(0, 0, 0);
+          scene.add(new THREE.AmbientLight(0xd9f2e1, .78));
+          const key = new THREE.DirectionalLight(0xe4fff0, 1.25);
+          key.position.set(-8, 14, 12);
+          scene.add(key);
+          const fill = new THREE.PointLight(0x316f4c, 1.15, 55);
+          fill.position.set(4, -1, -8);
+          scene.add(fill);
+          const grid = new THREE.GridHelper(64, 32, 0x365443, 0x19271f);
+          grid.position.y = -5.7;
+          grid.material.transparent = true;
+          grid.material.opacity = .28;
+          scene.add(grid);
+          makeLaneLabel('CLIENTES', -9.2, 5.4, -.5);
+          makeLaneLabel('ENTRADA HTTP', -9.2, 2.65, -.5);
+          makeLaneLabel('API · CONTRATOS · CASOS DE USO', -9.2, -.45, -.5);
+          makeLaneLabel('ALGORITMOS · CALLES · TRÁFICO', -9.2, -3.15, -.5);
+          makeLaneLabel('PERSISTENCIA', -2.7, -5.9, 3.5);
+          nodes.forEach(createNode);
+          edges.forEach(createConnection);
+          resize();
+          animate(0);
+          updateSceneState();
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : String(error);
+          showSceneError(`No se pudo iniciar la escena 3D: ${detail}`);
+        }
+      }
+
+      nodes.forEach(node => {
+        const option = document.createElement('option');
+        option.value = node.id;
+        option.textContent = node.name;
+        picker.append(option);
+      });
+      document.querySelectorAll('[data-flow]').forEach(button => button.addEventListener('click', () => setFlow(button.dataset.flow)));
+      document.getElementById('step-back').addEventListener('click', () => showStep(activeStep - 1));
+      document.getElementById('step-forward').addEventListener('click', () => showStep(activeStep + 1));
+      document.getElementById('reset-camera').addEventListener('click', () => {
+        yaw = -.38;
+        pitch = .44;
+        zoom = 1;
+        resetOverviewTarget();
+        status.textContent = 'Vista general restablecida.';
+      });
+      picker.addEventListener('change', () => selectNode(picker.value, false, true));
+      window.addEventListener('resize', resize);
+      canvas.addEventListener('pointerdown', event => {
+        drag = { x: event.clientX, y: event.clientY, yaw, pitch, distance: 0 };
+        canvas.setPointerCapture(event.pointerId);
+      });
+      canvas.addEventListener('pointermove', event => {
+        if (!drag) return;
+        const dx = event.clientX - drag.x;
+        const dy = event.clientY - drag.y;
+        drag.distance += Math.abs(dx) + Math.abs(dy);
+        drag.x = event.clientX;
+        drag.y = event.clientY;
+        if (drag.distance > 3) {
+          yaw -= dx * .005;
+          pitch = Math.max(-.05, Math.min(1.1, pitch + dy * .004));
+        }
+      });
+      canvas.addEventListener('pointerup', event => {
+        if (drag && drag.distance < 5 && renderer) {
+          const rect = canvas.getBoundingClientRect();
+          pointer.set(((event.clientX - rect.left) / rect.width) * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1);
+          raycaster.setFromCamera(pointer, camera);
+          const hit = raycaster.intersectObjects([...nodeMeshes.values()].flatMap(visual => visual.group.children))[0];
+          const id = hit?.object.userData.nodeId;
+          if (id) selectNode(id, true, true);
+        }
+        drag = null;
+      });
+      canvas.addEventListener('pointercancel', () => { drag = null; });
+      canvas.addEventListener('wheel', event => {
+        event.preventDefault();
+        zoom = Math.max(.55, Math.min(1.8, zoom * (event.deltaY > 0 ? .92 : 1.08)));
+      }, { passive: false });
+
+      initScene();
+      showStep(0);
+    })();
+  </script>
+</body>
+</html>
