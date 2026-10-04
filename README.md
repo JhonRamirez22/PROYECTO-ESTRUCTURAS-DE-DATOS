@@ -341,7 +341,7 @@ backend/
   alembic/                # Migraciones Python
   scripts/                # Preflight y bootstrap controlado de DB
   tests/                  # pytest unitario y de API
-deploy/aws/               # CDK, ECS/RDS/ALB y tareas puntuales de DB
+deploy/aws/               # CDK, ECS Express/RDS y tareas puntuales de DB
 docs/                     # Arquitectura y decisiones operativas
 ios/                      # App nativa SwiftUI para repartidores
 tests/e2e/                # Playwright
@@ -400,41 +400,32 @@ reales a un proveedor.
 
 ## Despliegue
 
-- **Frontend:** contenedor Next.js standalone en ECS/Fargate.
-- **Backend:** contenedor FastAPI separado en ECS/Fargate, accesible por el ALB
-  únicamente para `/api/*`.
+- **Frontend:** Next.js 15 en Vercel, con el dominio HTTPS `*.vercel.app`.
+- **Backend:** FastAPI en ECS Express Mode (Fargate), con endpoint HTTPS de AWS.
+  Next.js hace proxy de `/api/*` desde el mismo dominio de Vercel mediante
+  `PYTHON_API_URL`; el navegador no llama directamente a AWS.
 - **Base de datos:** PostgreSQL en RDS, cifrada y en subredes privadas aisladas;
   solo FastAPI puede abrir el puerto PostgreSQL.
-- **Entrada web:** Application Load Balancer con HTTPS en producción.
 - **Migraciones:** tarea Fargate puntual Alembic; no se ejecutan durante el build.
 
 Los archivos de preparación están en [`deploy/aws/README.md`](deploy/aws/README.md):
-Dockerfiles independientes, CDK, secretos de Secrets Manager, bootstrap del rol
-de base de datos y tarea de migraciones. Next genera una salida `standalone` para
-su imagen ECS según la [documentación de salida de Next.js](https://nextjs.org/docs/app/api-reference/config/next-config-js/output).
-El CDK mantiene subredes separadas para ALB, aplicaciones y RDS. El ALB enruta
-`/api` y `/api/*` a FastAPI, y lo demás a Next.js; este patrón usa target groups
-y reglas de listener documentados para [Application Load Balancer en ECS](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/service-load-balancing.html).
+Dockerfile del backend, CDK, secretos de Secrets Manager, bootstrap del rol de
+base de datos y tarea de migraciones. La salida `standalone` de Next se conserva
+para contenedores locales, aunque producción sirve el frontend desde Vercel.
+ECS Express Mode administra el endpoint HTTPS del backend; no se necesita
+comprar un dominio propio para conectar Vercel con AWS.
 
-En ECS, la contraseña del rol de aplicación y demás credenciales llegan desde
-Secrets Manager como valores secretos. La app usa `verify-full` y el bundle de
-CA de RDS; PostgreSQL no se expone públicamente, siguiendo las opciones de
-[TLS para RDS PostgreSQL](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/PostgreSQL.Concepts.General.SSL.html)
-y [subredes privadas para instancias RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_VPC.WorkingWithRDSInstanceinaVPC.html).
-El backend inicia en una tarea porque la cola FIFO de eventos GPS es local a
-proceso; el frontend de producción puede iniciar en dos. No se configuró
-autoescalado horizontal del backend hasta coordinar esa cola entre procesos.
+Las credenciales `AUTH_SECRET`, `DISPATCHER_ACCESS_CODE`, base de datos y
+proveedores externos son exclusivas del backend y se guardan en AWS Secrets
+Manager. Vercel recibe únicamente el origen público no secreto `PYTHON_API_URL`
+y las variables públicas del mapa. RDS sigue privado y FastAPI verifica su TLS
+con `verify-full` y el bundle CA.
 
-La infraestructura no se ha subido ni desplegado desde esta preparación. Para
-evitar crear costos sin autorización, `servicesEnabled` arranca en `false` y
-las tareas web quedan detenidas hasta que RDS tenga el usuario de aplicación y
-sus migraciones. `deploy/aws/README.md` describe la secuencia manual. En
-desarrollo local se conserva `DATABASE_URL`; en RDS se usan host, usuario y
-contraseña separados con TLS.
-
-El entorno productivo requiere dominio y certificado ACM validado. Revisa los
-costos de NAT, ALB, ECS y RDS, agrega las claves de proveedores por fuera del
-repositorio y prueba el flujo end-to-end antes de cargar pedidos reales.
+El backend se mantiene en una tarea porque la cola FIFO de eventos GPS y el
+worker de notificaciones son locales al proceso. No se escala horizontalmente
+hasta coordinar esos consumidores. La infraestructura todavía requiere revisar
+cuenta/región, costo y `cdk diff` antes de crear o modificar recursos; las
+migraciones y el flujo end-to-end se verifican antes de operar con pedidos reales.
 
 ## Licencia
 

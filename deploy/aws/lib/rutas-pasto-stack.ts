@@ -4,7 +4,7 @@ import { Duration, RemovalPolicy, Stack, StackProps } from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import * as ecs from 'aws-cdk-lib/aws-ecs';
 import * as ecrAssets from 'aws-cdk-lib/aws-ecr-assets';
-import * as elbv2 from 'aws-cdk-lib/aws-elasticloadbalancingv2';
+import * as iam from 'aws-cdk-lib/aws-iam';
 import * as logs from 'aws-cdk-lib/aws-logs';
 import * as rds from 'aws-cdk-lib/aws-rds';
 import * as secretsmanager from 'aws-cdk-lib/aws-secretsmanager';
@@ -35,17 +35,16 @@ interface RutasPastoStackProps extends StackProps {
   environmentName: string;
   production: boolean;
   servicesEnabled: boolean;
-  certificateArn?: string;
 }
 
 export class RutasPastoStack extends Stack {
   constructor(scope: Construct, id: string, props: RutasPastoStackProps) {
     super(scope, id, props);
 
-    const { environmentName, production, servicesEnabled, certificateArn } = props;
+    const { environmentName, production, servicesEnabled } = props;
     const resourcePrefix = `rutas-pasto/${environmentName}`;
     const repositoryRoot = path.resolve(__dirname, '../../..');
-    const imagePlatform = ecrAssets.Platform.LINUX_ARM64;
+    const imagePlatform = ecrAssets.Platform.LINUX_AMD64;
 
     const vpc = new ec2.Vpc(this, 'ApplicationVpc', {
       maxAzs: 2,
@@ -65,45 +64,11 @@ export class RutasPastoStack extends Stack {
       ],
     });
 
-    const loadBalancerSecurityGroup = new ec2.SecurityGroup(this, 'LoadBalancerSecurityGroup', {
-      vpc,
-      description: 'Entrada web; TLS es obligatorio en prod.',
-      allowAllOutbound: true,
-    });
-    loadBalancerSecurityGroup.addIngressRule(
-      ec2.Peer.anyIpv4(),
-      ec2.Port.tcp(80),
-      'HTTP público o redirección a HTTPS'
-    );
-    if (production) {
-      loadBalancerSecurityGroup.addIngressRule(
-        ec2.Peer.anyIpv4(),
-        ec2.Port.tcp(443),
-        'HTTPS público'
-      );
-    }
-
-    const frontendSecurityGroup = new ec2.SecurityGroup(this, 'FrontendSecurityGroup', {
-      vpc,
-      description: 'Next.js traffic only from the ALB.',
-      allowAllOutbound: true,
-    });
-    frontendSecurityGroup.addIngressRule(
-      loadBalancerSecurityGroup,
-      ec2.Port.tcp(3000),
-      'Tráfico web del ALB'
-    );
-
     const backendSecurityGroup = new ec2.SecurityGroup(this, 'BackendSecurityGroup', {
       vpc,
-      description: 'FastAPI traffic only from the ALB.',
+      description: 'FastAPI: sin entrada directa; PostgreSQL permite conexiones desde este grupo.',
       allowAllOutbound: true,
     });
-    backendSecurityGroup.addIngressRule(
-      loadBalancerSecurityGroup,
-      ec2.Port.tcp(8000),
-      'Tráfico /api del ALB'
-    );
 
     const databaseSecurityGroup = new ec2.SecurityGroup(this, 'DatabaseSecurityGroup', {
       vpc,
@@ -191,11 +156,6 @@ export class RutasPastoStack extends Stack {
       containerInsightsV2: ecs.ContainerInsights.ENABLED,
     });
 
-    const frontendImage = new ecrAssets.DockerImageAsset(this, 'FrontendImage', {
-      directory: repositoryRoot,
-      file: 'Dockerfile',
-      platform: imagePlatform,
-    });
     const backendImage = new ecrAssets.DockerImageAsset(this, 'BackendImage', {
       directory: path.join(repositoryRoot, 'backend'),
       file: 'Dockerfile',
@@ -203,7 +163,6 @@ export class RutasPastoStack extends Stack {
     });
 
     const backendEnvironment: Record<string, string> = {
-      NODE_ENV: production ? 'production' : 'development',
       DATABASE_HOST: database.instanceEndpoint.hostname,
       DATABASE_PORT: '5432',
       DATABASE_NAME,
@@ -224,37 +183,6 @@ export class RutasPastoStack extends Stack {
       TOMTOM_TRAFFIC_TIMEOUT_MS: '3500',
       AI_TRAFFIC_TIMEOUT_MS: '5000',
     };
-
-    const applicationTaskDefinition = this.createTaskDefinition(
-      'BackendTaskDefinition',
-      `${resourcePrefix}-backend`,
-      512,
-      1024
-    );
-    const backendContainer = applicationTaskDefinition.addContainer('FastApi', {
-      image: ecs.ContainerImage.fromDockerImageAsset(backendImage),
-      environment: backendEnvironment,
-      logging: this.createLogs('BackendLogs', `/aws/ecs/${resourcePrefix}/backend`),
-      stopTimeout: Duration.seconds(60),
-      healthCheck: {
-        command: [
-          'CMD-SHELL',
-          'python -c "from urllib.request import urlopen; urlopen(\'http://127.0.0.1:8000/api/health\', timeout=3)" || exit 1',
-        ],
-        interval: Duration.seconds(30),
-        timeout: Duration.seconds(5),
-        retries: 3,
-        startPeriod: Duration.seconds(45),
-      },
-    });
-    backendContainer.addPortMappings({ containerPort: 8000, protocol: ecs.Protocol.TCP });
-    this.addDatabaseSecrets(backendContainer, applicationDatabasePassword);
-    backendContainer.addSecret('AUTH_SECRET', ecs.Secret.fromSecretsManager(authSecret));
-    backendContainer.addSecret(
-      'DISPATCHER_ACCESS_CODE',
-      ecs.Secret.fromSecretsManager(dispatcherCodeSecret)
-    );
-    this.addIntegrationSecrets(backendContainer, integrationSecret);
 
     const bootstrapTaskDefinition = this.createTaskDefinition(
       'DatabaseBootstrapTaskDefinition',
@@ -309,123 +237,81 @@ export class RutasPastoStack extends Stack {
     });
     this.addDatabaseSecrets(migrationContainer, applicationDatabasePassword);
 
-    const frontendTaskDefinition = this.createTaskDefinition(
-      'FrontendTaskDefinition',
-      `${resourcePrefix}-frontend`,
-      512,
-      1024
-    );
-    const frontendContainer = frontendTaskDefinition.addContainer('NextJs', {
-      image: ecs.ContainerImage.fromDockerImageAsset(frontendImage),
-      environment: {
-        NODE_ENV: 'production',
-        NEXT_PUBLIC_MAP_DEFAULT_LAT: '1.2136',
-        NEXT_PUBLIC_MAP_DEFAULT_LNG: '-77.2811',
-      },
-      logging: this.createLogs('FrontendLogs', `/aws/ecs/${resourcePrefix}/frontend`),
-      stopTimeout: Duration.seconds(60),
-      healthCheck: {
-        command: [
-          'CMD-SHELL',
-          'node -e "fetch(\'http://127.0.0.1:3000/\').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"',
+    if (servicesEnabled) {
+      const taskExecutionRole = new iam.Role(this, 'BackendTaskExecutionRole', {
+        assumedBy: new iam.ServicePrincipal('ecs-tasks.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName(
+            'service-role/AmazonECSTaskExecutionRolePolicy'
+          ),
         ],
-        interval: Duration.seconds(30),
-        timeout: Duration.seconds(5),
-        retries: 3,
-        startPeriod: Duration.seconds(45),
-      },
-    });
-    frontendContainer.addPortMappings({ containerPort: 3000, protocol: ecs.Protocol.TCP });
-
-    const frontendService = this.createService(
-      'FrontendService',
-      cluster,
-      frontendTaskDefinition,
-      frontendSecurityGroup,
-      servicesEnabled ? (production ? 2 : 1) : 0
-    );
-    const backendService = this.createService(
-      'BackendService',
-      cluster,
-      applicationTaskDefinition,
-      backendSecurityGroup,
-      servicesEnabled ? 1 : 0
-    );
-
-    const loadBalancer = new elbv2.ApplicationLoadBalancer(this, 'ApplicationLoadBalancer', {
-      vpc,
-      internetFacing: true,
-      vpcSubnets: { subnetType: ec2.SubnetType.PUBLIC },
-      securityGroup: loadBalancerSecurityGroup,
-      deletionProtection: production,
-    });
-
-    let webListener: elbv2.ApplicationListener;
-    if (certificateArn !== undefined) {
-      webListener = loadBalancer.addListener('HttpsListener', {
-        port: 443,
-        open: false,
-        certificates: [elbv2.ListenerCertificate.fromArn(certificateArn)],
-        sslPolicy: elbv2.SslPolicy.TLS13_RES,
       });
-      const httpListener = loadBalancer.addListener('HttpRedirectListener', {
-        port: 80,
-        open: false,
+      for (const secret of [
+        applicationDatabasePassword,
+        authSecret,
+        dispatcherCodeSecret,
+        integrationSecret,
+      ]) {
+        secret.grantRead(taskExecutionRole);
+      }
+
+      const expressInfrastructureRole = new iam.Role(this, 'ExpressInfrastructureRole', {
+        assumedBy: new iam.ServicePrincipal('ecs.amazonaws.com'),
+        managedPolicies: [
+          iam.ManagedPolicy.fromAwsManagedPolicyName(
+            'service-role/AmazonECSInfrastructureRoleforExpressGatewayServices'
+          ),
+        ],
       });
-      httpListener.addAction('RedirectToHttps', {
-        action: elbv2.ListenerAction.redirect({
-          protocol: 'HTTPS',
-          port: '443',
-          permanent: true,
-        }),
+      const backendLogGroup = new logs.LogGroup(this, 'BackendLogs', {
+        logGroupName: `/aws/ecs/${resourcePrefix}/backend`,
+        retention: logs.RetentionDays.ONE_MONTH,
+        removalPolicy: RemovalPolicy.RETAIN,
       });
-    } else {
-      webListener = loadBalancer.addListener('HttpListener', {
-        port: 80,
-        open: false,
+      const backendSecrets = [
+        { name: 'DATABASE_PASSWORD', valueFrom: applicationDatabasePassword.secretArn },
+        { name: 'AUTH_SECRET', valueFrom: authSecret.secretArn },
+        { name: 'DISPATCHER_ACCESS_CODE', valueFrom: dispatcherCodeSecret.secretArn },
+        ...INTEGRATION_SECRET_FIELDS.map((field) => ({
+          name: field,
+          valueFrom: `${integrationSecret.secretArn}:${field}::`,
+        })),
+      ];
+
+      const backendService = new ecs.CfnExpressGatewayService(this, 'BackendExpressService', {
+        cluster: cluster.clusterName,
+        cpu: '512',
+        memory: '1024',
+        executionRoleArn: taskExecutionRole.roleArn,
+        infrastructureRoleArn: expressInfrastructureRole.roleArn,
+        healthCheckPath: '/api/health',
+        networkConfiguration: {
+          subnets: vpc.publicSubnets.map((subnet) => subnet.subnetId),
+          securityGroups: [backendSecurityGroup.securityGroupId],
+        },
+        scalingTarget: {
+          minTaskCount: 1,
+          // The GPS queue and notification worker are process-local; stay single-instance for MVP.
+          maxTaskCount: 1,
+        },
+        serviceName: `rutas-pasto-${environmentName}-api`,
+        primaryContainer: {
+          image: backendImage.imageUri,
+          containerPort: 8000,
+          environment: Object.entries(backendEnvironment).map(([name, value]) => ({ name, value })),
+          secrets: backendSecrets,
+          awsLogsConfiguration: {
+            logGroup: backendLogGroup.logGroupName,
+            logStreamPrefix: 'fastapi',
+          },
+        },
+      });
+      new cdk.CfnOutput(this, 'BackendUrl', {
+        value: backendService.attrEndpoint,
+        description:
+          'Endpoint HTTPS administrado por ECS Express Mode; configúralo como PYTHON_API_URL en Vercel.',
       });
     }
-
-    const apiTargetGroup = new elbv2.ApplicationTargetGroup(this, 'BackendTargetGroup', {
-      vpc,
-      port: 8000,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-      targetType: elbv2.TargetType.IP,
-      targets: [backendService],
-      healthCheck: {
-        path: '/api/health',
-        healthyHttpCodes: '200',
-        interval: Duration.seconds(30),
-        timeout: Duration.seconds(5),
-        healthyThresholdCount: 2,
-        unhealthyThresholdCount: 3,
-      },
-      deregistrationDelay: Duration.seconds(30),
-    });
-    webListener.addTargetGroups('ApiPathRouting', {
-      priority: 10,
-      conditions: [elbv2.ListenerCondition.pathPatterns(['/api', '/api/*'])],
-      targetGroups: [apiTargetGroup],
-    });
-    webListener.addTargets('FrontendDefault', {
-      port: 3000,
-      protocol: elbv2.ApplicationProtocol.HTTP,
-      targets: [frontendService],
-      healthCheck: {
-        path: '/',
-        healthyHttpCodes: '200-399',
-        interval: Duration.seconds(30),
-        timeout: Duration.seconds(5),
-        healthyThresholdCount: 2,
-        unhealthyThresholdCount: 3,
-      },
-      deregistrationDelay: Duration.seconds(30),
-    });
-
-    new cdk.CfnOutput(this, 'ApplicationUrl', {
-      value: `${certificateArn ? 'https' : 'http'}://${loadBalancer.loadBalancerDnsName}`,
-      description: 'Punto de entrada único; el ALB envía /api/* a FastAPI y el resto a Next.js.',
-    });
     new cdk.CfnOutput(this, 'EcsClusterName', { value: cluster.clusterName });
     new cdk.CfnOutput(this, 'DatabaseEndpoint', {
       value: database.instanceEndpoint.hostname,
@@ -453,9 +339,9 @@ export class RutasPastoStack extends Stack {
     new cdk.CfnOutput(this, 'IntegrationSecretName', {
       value: integrationSecret.secretName,
     });
-    new cdk.CfnOutput(this, 'ServicesInitiallyEnabled', {
+    new cdk.CfnOutput(this, 'BackendInitiallyEnabled', {
       value: servicesEnabled ? 'true' : 'false',
-      description: 'Los servicios empiezan detenidos hasta inicializar rol y migraciones.',
+      description: 'El backend se habilita tras completar bootstrap y migraciones de PostgreSQL.',
     });
   }
 
@@ -486,7 +372,7 @@ export class RutasPastoStack extends Stack {
       memoryLimitMiB,
       runtimePlatform: {
         operatingSystemFamily: ecs.OperatingSystemFamily.LINUX,
-        cpuArchitecture: ecs.CpuArchitecture.ARM64,
+        cpuArchitecture: ecs.CpuArchitecture.X86_64,
       },
     });
   }
@@ -507,34 +393,4 @@ export class RutasPastoStack extends Stack {
     container.addSecret('DATABASE_PASSWORD', ecs.Secret.fromSecretsManager(applicationPassword));
   }
 
-  private addIntegrationSecrets(
-    container: ecs.ContainerDefinition,
-    secret: secretsmanager.ISecret
-  ): void {
-    for (const field of INTEGRATION_SECRET_FIELDS) {
-      container.addSecret(field, ecs.Secret.fromSecretsManager(secret, field));
-    }
-  }
-
-  private createService(
-    id: string,
-    cluster: ecs.Cluster,
-    taskDefinition: ecs.FargateTaskDefinition,
-    securityGroup: ec2.SecurityGroup,
-    desiredCount: number
-  ): ecs.FargateService {
-    return new ecs.FargateService(this, id, {
-      cluster,
-      taskDefinition,
-      desiredCount,
-      assignPublicIp: false,
-      platformVersion: ecs.FargatePlatformVersion.LATEST,
-      securityGroups: [securityGroup],
-      vpcSubnets: { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS },
-      minHealthyPercent: 50,
-      maxHealthyPercent: 200,
-      circuitBreaker: { rollback: true },
-      enableECSManagedTags: true,
-    });
-  }
 }
