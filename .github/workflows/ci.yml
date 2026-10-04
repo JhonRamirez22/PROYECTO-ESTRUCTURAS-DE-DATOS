@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verificar aplicación
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rutas_pasto
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d rutas_pasto"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      CI: 'true'
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/rutas_pasto?schema=public
+      AUTH_SECRET: ci-only-auth-secret-not-used-in-production-2026
+      DISPATCHER_ACCESS_CODE: ci-only-dispatcher-code-not-used-in-production
+      AI_ALLOW_LOCATION_DATA_SHARING: 'false'
+      AI_TRAFFIC_API_URL: ''
+      AI_TRAFFIC_API_KEY: ''
+      AI_TRAFFIC_MODEL: ''
+      NEXT_PUBLIC_MAP_DEFAULT_LAT: '1.2136'
+      NEXT_PUBLIC_MAP_DEFAULT_LNG: '-77.2811'
+
+    steps:
+      - name: Descargar código
+        uses: actions/checkout@v6
+
+      - name: Instalar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.17'
+
+      - name: Instalar dependencias del backend
+        run: uv sync --project backend --locked
+
+      - name: Instalar pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 10.34.5
+
+      - name: Instalar Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      - name: Aplicar migraciones de PostgreSQL
+        run: pnpm db:migrate
+
+      - name: Validar backend Python
+        env:
+          RUN_POSTGRES_INTEGRATION: '1'
+        run: |
+          pnpm typecheck:backend
+          pnpm lint:backend
+          pnpm test:backend
+
+      - name: Validar TypeScript
+        run: pnpm typecheck
+
+      - name: Validar lint
+        run: pnpm lint
+
+      - name: Ejecutar pruebas unitarias de interfaz
+        run: pnpm test
+
+      - name: Instalar Chromium para Playwright
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Ejecutar pruebas E2E
+        run: pnpm test:e2e
+
+      - name: Construir para producción
+        run: pnpm build
+
+      - name: Guardar reporte E2E si falla
+        if: failure()
+        uses: actions/upload-artifact@v5
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

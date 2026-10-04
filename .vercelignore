@@ -1,0 +1,6 @@
+# Las credenciales locales y las variables bajadas desde Vercel nunca se despliegan.
+.env
+.env.*
+**/.env
+**/.env.*
+.vercel/.env.*
